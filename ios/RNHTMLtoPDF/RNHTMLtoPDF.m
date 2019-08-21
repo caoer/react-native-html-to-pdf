@@ -1,7 +1,6 @@
 
 //  Created by Christopher on 9/3/15.
 
-#import <CoreGraphics/CoreGraphics.h>
 #import <UIKit/UIKit.h>
 #import <React/RCTConvert.h>
 #import <React/RCTEventDispatcher.h>
@@ -10,11 +9,11 @@
 #import <React/RCTUtils.h>
 #import "RNHTMLtoPDF.h"
 
+
 #define PDFSize CGSizeMake(612,792)
 
 @implementation UIPrintPageRenderer (PDF)
-- (NSData*) printToPDF:(NSInteger**)_numberOfPages
-                   backgroundColor:(UIColor*)_bgColor
+- (NSData*) printToPDF
 {
     NSMutableData *pdfData = [NSMutableData data];
     UIGraphicsBeginPDFContextToData( pdfData, self.paperRect, nil );
@@ -26,16 +25,8 @@
     for ( int i = 0 ; i < self.numberOfPages ; i++ )
     {
         UIGraphicsBeginPDFPage();
-
-
-        CGContextRef currentContext = UIGraphicsGetCurrentContext();
-        CGContextSetFillColorWithColor(currentContext, _bgColor.CGColor);
-        CGContextFillRect(currentContext, self.paperRect);
-
         [self drawPageAtIndex: i inRect: bounds];
     }
-
-    *_numberOfPages = self.numberOfPages;
 
     UIGraphicsEndPDFContext();
     return pdfData;
@@ -49,14 +40,9 @@
     NSString *_html;
     NSString *_fileName;
     NSString *_filePath;
-    UIColor *_bgColor;
-    NSInteger *_numberOfPages;
     CGSize _PDFSize;
-    UIWebView *_webView;
-    float _paddingBottom;
-    float _paddingTop;
-    float _paddingLeft;
-    float _paddingRight;
+    WKWebView *_webView;
+    float _padding;
     BOOL _base64;
     BOOL autoHeight;
 }
@@ -73,8 +59,8 @@ RCT_EXPORT_MODULE();
 - (instancetype)init
 {
     if (self = [super init]) {
-        _webView = [[UIWebView alloc] initWithFrame:self.bounds];
-        _webView.delegate = self;
+        _webView = [[WKWebView alloc] initWithFrame:self.bounds];
+        _webView.navigationDelegate = self;
         [self addSubview:_webView];
         autoHeight = false;
     }
@@ -95,29 +81,7 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
         _fileName = [[NSProcessInfo processInfo] globallyUniqueString];
     }
 
-    // Default Color
-    _bgColor = [UIColor colorWithRed: (246.0/255.0) green:(245.0/255.0) blue:(240.0/255.0) alpha:1];
-    if (options[@"bgColor"]){
-        NSString *hex = [RCTConvert NSString:options[@"bgColor"]];
-        hex = [hex uppercaseString];
-        NSString *cString = [hex stringByTrimmingCharactersInSet:
-            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-
-        if ((cString.length) == 7) {
-            NSScanner *scanner = [NSScanner scannerWithString:cString];
-
-            UInt32 rgbValue = 0;
-            [scanner setScanLocation:1]; // Bypass '#' character
-            [scanner scanHexInt:&rgbValue];
-
-            _bgColor = [UIColor colorWithRed:((float)((rgbValue & 0xFF0000) >> 16))/255.0 \
-                                       green:((float)((rgbValue & 0x00FF00) >>  8))/255.0 \
-                                        blue:((float)((rgbValue & 0x0000FF) >>  0))/255.0 \
-                                       alpha:1.0];
-        }
-    }
-
-    if (options[@"directory"] && [options[@"directory"] isEqualToString:@"Documents"]){
+    if (options[@"directory"] && [options[@"directory"] isEqualToString:@"docs"]){
         NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
         NSString *documentsPath = [paths objectAtIndex:0];
 
@@ -140,35 +104,10 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
         _PDFSize = PDFSize;
     }
 
-    if (options[@"paddingBottom"]) {
-        _paddingBottom = [RCTConvert float:options[@"paddingBottom"]];
-    } else {
-        _paddingBottom = 10.0f;
-    }
-
-    if (options[@"paddingLeft"]) {
-        _paddingLeft = [RCTConvert float:options[@"paddingLeft"]];
-    } else {
-        _paddingLeft = 10.0f;
-    }
-
-    if (options[@"paddingTop"]) {
-        _paddingTop = [RCTConvert float:options[@"paddingTop"]];
-    } else {
-        _paddingTop = 10.0f;
-    }
-
-    if (options[@"paddingRight"]) {
-        _paddingRight = [RCTConvert float:options[@"paddingRight"]];
-    } else {
-        _paddingRight = 10.0f;
-    }
-
     if (options[@"padding"]) {
-        _paddingTop = [RCTConvert float:options[@"padding"]];
-        _paddingBottom = [RCTConvert float:options[@"padding"]];
-        _paddingLeft = [RCTConvert float:options[@"padding"]];
-        _paddingRight = [RCTConvert float:options[@"padding"]];
+        _padding = [RCTConvert float:options[@"padding"]];
+    } else {
+        _padding = 10.0f;
     }
 
     NSString *path = [[NSBundle mainBundle] bundlePath];
@@ -181,24 +120,20 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
 
 }
 
-- (void)webViewDidFinishLoad:(UIWebView *)awebView
-{
-    if (awebView.isLoading)
-        return;
+- (void)webView:(WKWebView *)webView didFinishNavigation:(WKNavigation *)navigation {
 
     UIPrintPageRenderer *render = [[UIPrintPageRenderer alloc] init];
-    [render addPrintFormatter:awebView.viewPrintFormatter startingAtPageAtIndex:0];
+    [render addPrintFormatter:webView.viewPrintFormatter startingAtPageAtIndex:0];
 
     // Define the printableRect and paperRect
     // If the printableRect defines the printable area of the page
     CGRect paperRect = CGRectMake(0, 0, _PDFSize.width, _PDFSize.height);
-    CGRect printableRect = CGRectMake(_paddingTop, _paddingLeft, _PDFSize.width-(_paddingLeft + _paddingRight), _PDFSize.height-(_paddingBottom + _paddingTop));
-
+    CGRect printableRect = CGRectMake(_padding, _padding, _PDFSize.width-(_padding * 2), _PDFSize.height-(_padding * 2));
 
     [render setValue:[NSValue valueWithCGRect:paperRect] forKey:@"paperRect"];
     [render setValue:[NSValue valueWithCGRect:printableRect] forKey:@"printableRect"];
 
-    NSData * pdfData = [render printToPDF:&_numberOfPages backgroundColor:_bgColor ];
+    NSData *pdfData = [render printToPDF];
 
     if (pdfData) {
         NSString *pdfBase64 = @"";
@@ -208,9 +143,8 @@ RCT_EXPORT_METHOD(convert:(NSDictionary *)options
             pdfBase64 = [pdfData base64EncodedStringWithOptions:0];
         }
         NSDictionary *data = [NSDictionary dictionaryWithObjectsAndKeys:
-                             pdfBase64, @"base64",
-                             [NSString stringWithFormat: @"%ld", (long)_numberOfPages], @"numberOfPages",
-                             _filePath, @"filePath", nil];
+                              pdfBase64, @"base64",
+                              _filePath, @"filePath", nil];
         _resolveBlock(data);
     } else {
         NSError *error;
